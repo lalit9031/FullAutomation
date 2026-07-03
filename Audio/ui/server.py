@@ -87,6 +87,107 @@ def get_instruct_prompt(gender: str, style: str, language: str) -> str:
     final = [x for x in tokens if not (x in seen or seen.add(x))]
     return ", ".join(final)
 
+def parse_script_to_phrases(text: str, style: str, gender: str, language: str):
+    import re
+    # Split text but keep the tags in the list of parts
+    parts = re.split(r'(\[[a-zA-Z0-9_]+\])', text)
+    
+    parsed_segments = []
+    
+    # State variables
+    current_voice = "default"
+    current_emotions = []
+    is_singing = (style == "singing" or "[singing]" in text) and language == "english"
+    
+    # We will accumulate text for the current speaker/emotion configuration
+    for part in parts:
+        if not part:
+            continue
+            
+        # Check if the part is a tag
+        if part.startswith("[") and part.endswith("]"):
+            tag_name = part[1:-1].lower()
+            if tag_name in ["narrator", "child", "kid", "male", "female"]:
+                current_voice = tag_name
+                # Reset current emotions when switching voices
+                current_emotions = []
+            elif tag_name in ["singing", "happy", "sad", "excited", "whisper", "laughter"]:
+                # Accumulate emotion tag
+                if part not in current_emotions:
+                    current_emotions.append(part)
+            continue
+            
+        # This is actual text. Split it by sentence terminators
+        # Devanagari full stop (।), standard period, exclamation, question mark, newline, semicolon
+        sentences = re.split(r'([\n.!?;।]+)', part)
+        
+        temp_text = ""
+        for s in sentences:
+            if not s:
+                continue
+                
+            # If it's a punctuation separator, append to the active sentence if possible
+            if re.match(r'^[\n.!?;।]+$', s):
+                if temp_text:
+                    temp_text += " " + s
+                    parsed_segments.append({
+                        "text": temp_text.strip(),
+                        "voice": current_voice,
+                        "emotions": list(current_emotions)
+                    })
+                    temp_text = ""
+                continue
+            
+            # This is a sentence text clause. If there was a trailing clause, save it first
+            s_strip = s.strip()
+            if not s_strip:
+                continue
+                
+            if temp_text:
+                parsed_segments.append({
+                    "text": temp_text.strip(),
+                    "voice": current_voice,
+                    "emotions": list(current_emotions)
+                })
+            temp_text = s_strip
+            
+        if temp_text:
+            parsed_segments.append({
+                "text": temp_text.strip(),
+                "voice": current_voice,
+                "emotions": list(current_emotions)
+            })
+            
+    # Now, we post-process the parsed_segments:
+    # 1. Clean the text (remove any remaining tags just in case)
+    # 2. Add correct prefixes (emotion tags)
+    final_segments = []
+    
+    for seg in parsed_segments:
+        text_clean = seg["text"]
+        for tag in ["[singing]", "[happy]", "[sad]", "[excited]", "[whisper]", "[laughter]", "[narrator]", "[child]", "[kid]", "[male]", "[female]"]:
+            text_clean = text_clean.replace(tag, "")
+        text_clean = " ".join(text_clean.split()).strip()
+        
+        if not text_clean:
+            continue
+            
+        # Prepend emotion tags
+        tags = list(seg["emotions"])
+        if is_singing and "[singing]" not in tags:
+            tags.insert(0, "[singing]")
+            
+        prefix = " ".join(tags)
+        if prefix:
+            text_clean = f"{prefix} {text_clean}"
+            
+        final_segments.append({
+            "text": text_clean,
+            "voice": seg["voice"]
+        })
+        
+    return final_segments
+
 @app.post("/api/chat")
 async def chat_agent(request: Request):
     data = await request.json()
@@ -241,93 +342,8 @@ async def generate_audio(request: Request):
     gender = data.get("gender", "male")
     style = data.get("style", "normal")
     
-    # 1. Parse text into phrases using newlines, major punctuation, and commas (with word-count merging)
-    import re
-    raw_lines = re.split(r'[\n.!?;]+', text)
-    text_lines = []  # List of dicts: {"text": str, "voice": str}
-    
-    # Check for active emotion tags in the user prompt script
-    has_happy = "[happy]" in text
-    has_sad = "[sad]" in text
-    has_excited = "[excited]" in text
-    has_whisper = "[whisper]" in text
-    
-    # Active voice profile tracking state machine
-    current_voice = "default"
-    
-    for line in raw_lines:
-        line_strip = line.strip()
-        if not line_strip:
-            continue
-            
-        # Update current voice if a voice tag is found in this line
-        if "[narrator]" in line_strip:
-            current_voice = "narrator"
-        elif "[child]" in line_strip or "[kid]" in line_strip:
-            current_voice = "child"
-        elif "[male]" in line_strip:
-            current_voice = "male"
-        elif "[female]" in line_strip:
-            current_voice = "female"
-            
-        # Split line by commas
-        comma_parts = [p.strip() for p in line_strip.split(",") if p.strip()]
-        
-        # Merge parts if they are too short (less than 3 words) to prevent choppy synthesis
-        temp_phrase = ""
-        for part in comma_parts:
-            # Clean all bracketed tags from the text content to prevent duplicate synthesis
-            part_clean = part
-            for tag in ["[singing]", "[happy]", "[sad]", "[excited]", "[whisper]", "[laughter]", "[narrator]", "[child]", "[kid]", "[male]", "[female]"]:
-                part_clean = part_clean.replace(tag, "")
-            part_clean = part_clean.strip()
-            
-            if not part_clean:
-                continue
-                
-            if not temp_phrase:
-                temp_phrase = part_clean
-            else:
-                word_count = len(temp_phrase.split())
-                if word_count < 3:
-                    temp_phrase = f"{temp_phrase}, {part_clean}"
-                else:
-                    # Construct correct prefix tags
-                    tags = []
-                    # Only apply singing tag for English language
-                    if (style == "singing" or "[singing]" in text) and language == "english":
-                        tags.append("[singing]")
-                    if has_happy or "[happy]" in line:
-                        tags.append("[happy]")
-                    elif has_sad or "[sad]" in line:
-                        tags.append("[sad]")
-                    elif has_excited or "[excited]" in line or "[laughter]" in line:
-                        tags.append("[excited]")
-                    elif has_whisper or style == "whisper" or "[whisper]" in line:
-                        tags.append("[whisper]")
-                        
-                    prefix = " ".join(tags)
-                    if prefix:
-                        temp_phrase = f"{prefix} {temp_phrase}"
-                    text_lines.append({"text": temp_phrase, "voice": current_voice})
-                    temp_phrase = part_clean
-        if temp_phrase:
-            tags = []
-            if (style == "singing" or "[singing]" in text) and language == "english":
-                tags.append("[singing]")
-            if has_happy or "[happy]" in line:
-                tags.append("[happy]")
-            elif has_sad or "[sad]" in line:
-                tags.append("[sad]")
-            elif has_excited or "[excited]" in line or "[laughter]" in line:
-                tags.append("[excited]")
-            elif has_whisper or style == "whisper" or "[whisper]" in line:
-                tags.append("[whisper]")
-                
-            prefix = " ".join(tags)
-            if prefix:
-                temp_phrase = f"{prefix} {temp_phrase}"
-            text_lines.append({"text": temp_phrase, "voice": current_voice})
+    # 1. Parse text using our smart tag-aware sentence tokenizer
+    text_lines = parse_script_to_phrases(text, style, gender, language)
         
     instruct = get_instruct_prompt(gender, style, language)
     
