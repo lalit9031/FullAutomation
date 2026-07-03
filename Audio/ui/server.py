@@ -89,47 +89,61 @@ def get_instruct_prompt(gender: str, style: str, language: str) -> str:
 
 def parse_script_to_phrases(text: str, style: str, gender: str, language: str):
     import re
-    # Split text but keep the tags in the list of parts
-    parts = re.split(r'(\[[a-zA-Z0-9_]+\])', text)
-    
-    parsed_segments = []
-    
-    # State variables
-    current_voice = "default"
-    current_emotions = []
     is_singing = (style == "singing" or "[singing]" in text) and language == "english"
     
-    # We will accumulate text for the current speaker/emotion configuration
-    for part in parts:
-        if not part:
+    # ── Pre-process: split on newlines first to track line boundaries ──
+    # Each line gets its OWN emotion state — emotions do NOT carry across lines.
+    # This prevents [happy] from line 1 bleeding into [excited] on line 2,
+    # which causes OmniVoice to read tag names aloud.
+    lines = text.split("\n")
+    
+    parsed_segments = []
+    current_voice = "default"  # Voice CAN carry across lines (narrator stays narrator)
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
             continue
-            
-        # Check if the part is a tag
-        if part.startswith("[") and part.endswith("]"):
-            tag_name = part[1:-1].lower()
-            if tag_name in ["narrator", "child", "kid", "male", "female"]:
-                current_voice = tag_name
-                # Reset current emotions when switching voices
-                current_emotions = []
-            elif tag_name in ["singing", "happy", "sad", "excited", "whisper", "laughter"]:
-                # Accumulate emotion tag
-                if part not in current_emotions:
-                    current_emotions.append(part)
+        
+        # Each line starts with a FRESH emotion slate
+        current_emotions = []
+        
+        # Split line into tags + text parts
+        parts = re.split(r'(\[[a-zA-Z0-9_]+\])', line)
+        
+        # First pass: extract leading tags and text pieces
+        text_pieces = []
+        for part in parts:
+            if not part.strip():
+                continue
+            if part.startswith("[") and part.endswith("]"):
+                tag_name = part[1:-1].lower()
+                if tag_name in ["narrator", "child", "kid", "male", "female"]:
+                    current_voice = tag_name
+                    # Voice switch also resets emotions
+                    current_emotions = []
+                elif tag_name in ["singing", "happy", "sad", "excited", "whisper", "laughter"]:
+                    if part not in current_emotions:
+                        current_emotions.append(part)
+            else:
+                text_pieces.append(part)
+        
+        # Combine remaining text, then split on sentence boundaries + ellipsis
+        line_text = " ".join(text_pieces).strip()
+        if not line_text:
             continue
-            
-        # This is actual text. Split it by sentence terminators
-        # Devanagari full stop (।), standard period, exclamation, question mark, newline, semicolon
-        sentences = re.split(r'([\n.!?;।]+)', part)
+        
+        # Split on: newline, period, !, ?, ;, Hindi full stop, OR ellipsis (...)
+        # Keep the delimiter so we can append it to the segment
+        sentences = re.split(r'(\.{3,}|[.!?;।]+)', line_text)
         
         temp_text = ""
         for s in sentences:
             if not s:
                 continue
-                
-            # If it's a punctuation separator, append to the active sentence if possible
-            if re.match(r'^[\n.!?;।]+$', s):
+            # Punctuation-only separator
+            if re.match(r'^(\.{3,}|[.!?;।]+)$', s):
                 if temp_text:
-                    temp_text += " " + s
                     parsed_segments.append({
                         "text": temp_text.strip(),
                         "voice": current_voice,
@@ -137,12 +151,9 @@ def parse_script_to_phrases(text: str, style: str, gender: str, language: str):
                     })
                     temp_text = ""
                 continue
-            
-            # This is a sentence text clause. If there was a trailing clause, save it first
             s_strip = s.strip()
             if not s_strip:
                 continue
-                
             if temp_text:
                 parsed_segments.append({
                     "text": temp_text.strip(),
@@ -150,33 +161,51 @@ def parse_script_to_phrases(text: str, style: str, gender: str, language: str):
                     "emotions": list(current_emotions)
                 })
             temp_text = s_strip
-            
+        
         if temp_text:
             parsed_segments.append({
                 "text": temp_text.strip(),
                 "voice": current_voice,
                 "emotions": list(current_emotions)
             })
+        
+        # ── DO NOT carry emotions to next line ── (already handled by per-line reset above)
+        # current_emotions is local to this loop iteration
+        
+        # Dummy reference to suppress unused-variable warning
             
-    # Now, we post-process the parsed_segments:
-    # 1. Clean the text (remove any remaining tags just in case)
-    # 2. Add correct prefixes (emotion tags)
+    # Post-process parsed_segments:
+    # 1. Strip any stray tag text from the segment content
+    # 2. Prepend correct emotion prefix (max ONE primary emotion tag + [singing])
     final_segments = []
+    EMOTION_TAGS = {"[singing]", "[happy]", "[sad]", "[excited]", "[whisper]", "[laughter]"}
+    VOICE_TAGS   = {"[narrator]", "[child]", "[kid]", "[male]", "[female]"}
+    ALL_STRIP    = EMOTION_TAGS | VOICE_TAGS
     
     for seg in parsed_segments:
         text_clean = seg["text"]
-        for tag in ["[singing]", "[happy]", "[sad]", "[excited]", "[whisper]", "[laughter]", "[narrator]", "[child]", "[kid]", "[male]", "[female]"]:
+        for tag in ALL_STRIP:
             text_clean = text_clean.replace(tag, "")
         text_clean = " ".join(text_clean.split()).strip()
         
         if not text_clean:
             continue
-            
-        # Prepend emotion tags
-        tags = list(seg["emotions"])
-        if is_singing and "[singing]" not in tags:
-            tags.insert(0, "[singing]")
-            
+        
+        # Build tag prefix — use at most ONE non-[singing] emotion to avoid confusion
+        seg_emotions = seg["emotions"]
+        
+        # Separate [singing] from other emotions
+        non_singing = [e for e in seg_emotions if e != "[singing]"]
+        has_singing = "[singing]" in seg_emotions or is_singing
+        
+        # Take only the FIRST non-singing emotion (e.g., [happy] OR [excited], never both)
+        primary_emotion = non_singing[:1]  # At most one emotion tag
+        
+        tags = []
+        if has_singing:
+            tags.append("[singing]")
+        tags.extend(primary_emotion)
+        
         prefix = " ".join(tags)
         if prefix:
             text_clean = f"{prefix} {text_clean}"
