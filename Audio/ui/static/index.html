@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Web Studio — AMD ROCm Edition</title>
+    <!-- Premium Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="galaxy-bg">
+        <!-- 3D Animated Audio Background Elements -->
+        <div class="audio-mesh"></div>
+        <div class="audio-waves-bg">
+            <div class="wave-ring ring-1"></div>
+            <div class="wave-ring ring-2"></div>
+            <div class="wave-ring ring-3"></div>
+            <div class="wave-ring ring-4"></div>
+        </div>
+        <div class="visualizer-backdrop">
+            <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+            <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+        </div>
+    </div>
+    <div class="main-wrapper">
+        <header class="studio-header">
+            <div class="header-logo">
+                <div class="logo-orb"></div>
+                <h1>Audio <span>Web Studio</span></h1>
+            </div>
+            <div class="gpu-badge">
+                <div class="pulse-dot"></div>
+                <span>ROCm Accelerated • Radeon RX 7900 XTX</span>
+            </div>
+        </header>
+
+        <div class="studio-layout">
+            <!-- Left Side: Chat Agent -->
+            <section class="panel glass chat-panel">
+                <div class="panel-header">
+                    <div class="icon-avatar">🤖</div>
+                    <div>
+                        <h2>Local AI Agent</h2>
+                        <p>Talk to configure generation parameters</p>
+                    </div>
+                </div>
+                <div class="chat-messages" id="chat-messages">
+                    <div class="message system-msg">
+                        Hello! I am your local synthesis coordinator. Tell me your ideas in natural language (e.g., "Write a funny kid story in Hindi", "Make a mysterious English whisper"). I will set the dials for you!
+                    </div>
+                </div>
+                <form class="chat-input-area" id="chat-form">
+                    <input type="text" id="chat-input" placeholder="Describe the voice & script..." required autocomplete="off">
+                    <button type="submit" class="send-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                    </button>
+                </form>
+            </section>
+
+            <!-- Right Side: Pipeline controls & Audio Output -->
+            <main class="panel-group">
+                <!-- Parameters section -->
+                <section class="panel glass control-panel">
+                    <div class="panel-header">
+                        <div class="icon-avatar">⚙️</div>
+                        <h2>Generator Parameters</h2>
+                    </div>
+
+                    <!-- Parameter selections -->
+                    <div class="param-grid">
+                        <!-- Language selector -->
+                        <div class="param-group">
+                            <label>Language</label>
+                            <div class="selector-pills" id="lang-selector">
+                                <button type="button" class="pill active" data-value="english">English</button>
+                                <button type="button" class="pill" data-value="hindi">Hindi</button>
+                                <button type="button" class="pill" data-value="bengali">Bengali</button>
+                                <button type="button" class="pill" data-value="tamil">Tamil</button>
+                                <button type="button" class="pill" data-value="telugu">Telugu</button>
+                                <button type="button" class="pill" data-value="marathi">Marathi</button>
+                                <button type="button" class="pill" data-value="gujarati">Gujarati</button>
+                                <button type="button" class="pill" data-value="kannada">Kannada</button>
+                                <button type="button" class="pill" data-value="malayalam">Malayalam</button>
+                                <button type="button" class="pill" data-value="punjabi">Punjabi</button>
+                            </div>
+                        </div>
+
+                        <!-- Gender/Age selector -->
+                        <div class="param-group">
+                            <label>Voice / Speaker Profile</label>
+                            <div class="selector-grid" id="gender-selector">
+                                <button type="button" class="grid-card active" data-value="male">
+                                    <div class="card-icon">👨</div>
+                                    <span>Male</span>
+                                </button>
+                                <button type="button" class="grid-card" data-value="female">
+                                    <div class="card-icon">👩</div>
+                                    <span>Female</span>
+                                </button>
+                                <button type="button" class="grid-card" data-value="kid_boy">
+                                    <div class="card-icon">👦</div>
+                                    <span>Kid (Boy)</span>
+                                </button>
+                                <button type="button" class="grid-card" data-value="kid_girl">
+                                    <div class="card-icon">👧</div>
+                                    <span>Kid (Girl)</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Style selector -->
+                        <div class="param-group">
+                            <label>Style Mode</label>
+                            <div class="selector-grid" id="style-selector">
+                                <button type="button" class="grid-card active" data-value="normal">
+                                    <div class="card-icon">🗣️</div>
+                                    <span>Normal</span>
+                                </button>
+                                <button type="button" class="grid-card" data-value="storytelling">
+                                    <div class="card-icon">📖</div>
+                                    <span>Storytelling</span>
+                                </button>
+                                <button type="button" class="grid-card" data-value="whisper">
+                                    <div class="card-icon">🤫</div>
+                                    <span>Whisper</span>
+                                </button>
+                                <button type="button" class="grid-card" data-value="exciting">
+                                    <div class="card-icon">⚡</div>
+                                    <span>Exciting</span>
+                                </button>
+                                <button type="button" class="grid-card" data-value="singing">
+                                    <div class="card-icon">🎵</div>
+                                    <span>Singing</span>
+                                </button>
+                                <button type="button" class="grid-card" data-value="poem">
+                                    <div class="card-icon">🎼</div>
+                                    <span>Poem/Rhymes</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Script Input -->
+                    <div class="param-group full-width">
+                        <label for="script-text">Script Text</label>
+                        <textarea id="script-text" rows="3" placeholder="Type the text you want the voice to say..."></textarea>
+                    </div>
+
+                    <!-- 3D Glowy Generate Button -->
+                    <div class="button-wrapper">
+                        <button type="button" class="btn-3d" id="btn-generate">
+                            <span class="btn-3d-top">
+                                <span class="btn-3d-text">Generate Audio</span>
+                            </span>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Audio Output section -->
+                <section class="panel glass output-panel" id="output-panel">
+                    <div class="panel-header">
+                        <div class="icon-avatar">🔊</div>
+                        <h2>Audio Studio</h2>
+                    </div>
+
+                    <div class="output-placeholder" id="output-placeholder">
+                        <p>Configure parameters above and click generate to create premium audio.</p>
+                    </div>
+
+                    <div class="output-loader hidden" id="output-loader">
+                        <div class="spinner"></div>
+                        <p>Synthesizing audio on AMD GPU...</p>
+                    </div>
+
+                    <div class="output-player-box hidden" id="player-box">
+                        <div class="player-meta">
+                            <div class="meta-tag" id="elapsed-time">Elapsed: 0.0s</div>
+                            <div class="meta-tag" id="active-instruct">Instruct: male, british</div>
+                        </div>
+                        <audio id="audio-player" controls src=""></audio>
+                        <div class="player-actions">
+                            <a id="btn-download" href="#" download class="btn-action">Download WAV</a>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>
