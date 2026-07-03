@@ -240,13 +240,15 @@ async def chat_agent(request: Request):
             "CRITICAL RULE: A poem uses ONE speaker voice only. NEVER use [narrator] in a poem.\n"
             "Use ONLY emotion tags to color each stanza/line. The single voice IS the poet.\n"
             "Format: ONE emotion tag per line → the voice carries the whole poem.\n"
-            "Emotions flow like: [happy] → [excited] → [whisper] → [sad] → [happy]\n"
+            "ALLOWED EMOTIONS FOR POEM (use ONLY these 3): [happy] [excited] [sad]\n"
+            "DO NOT use [whisper] or [laughter] in poems — they sound unnatural.\n"
+            "Emotions flow like: [happy] → [excited] → [sad] → [happy]\n"
             "Each line = 1 poetic line. Put emotion tag at start of each stanza or when feeling changes.\n"
             "POEM EXAMPLE (English):\n"
             "[happy] The morning sun rises golden and bright,\n"
             "[happy] Painting the sky with colors of light.\n"
             "[excited] The birds sing and the rivers flow free,\n"
-            "[whisper] In the quiet of dawn, there is only me.\n"
+            "[excited] In the warmth of dawn, my heart runs free.\n"
             "[sad] When evening comes and shadows grow long,\n"
             "[sad] I remember old dreams and a half-forgotten song.\n"
             "[happy] But the stars bring hope as they fill up the night,\n"
@@ -255,7 +257,7 @@ async def chat_agent(request: Request):
             "[happy] उगता सूरज लाल-नारंगी, चिड़ियाँ गाएं गीत।\n"
             "[happy] खेतों में हरियाली छाई, मन हो गया प्रीत।\n"
             "[excited] बच्चे दौड़े, खिलखिलाए, झूला झूलें संग।\n"
-            "[whisper] शाम ढली तो माँ की लोरी, भर दे मन में रंग।\n"
+            "[excited] उड़ती पतंगें, छूते आसमान, मन मस्त में रंग।\n"
             "[sad] पर जब बादल घिर आते हैं, आँखें भर आती हैं।\n"
             "[happy] फिर भी उम्मीद का दीपक, मन में जलता जाता है।\n"
             "SET: style=poem, gender=female (default for poems)\n"
@@ -517,13 +519,10 @@ async def generate_audio(request: Request):
                 
                 if "[happy]" in line or "[excited]" in line or "[laughter]" in line:
                     seg_tokens = [gender_token, age_token, "high pitch"]
-                elif "[sad]" in line:
+                elif "[sad]" in line or "[whisper]" in line:
+                    # [whisper] in poem = treat as [sad] (low pitch, gentle)
+                    # We don't use the whisper instruct — it sounds unnatural in poetry
                     seg_tokens = [gender_token, age_token, "low pitch"]
-                elif "[whisper]" in line:
-                    # In poems, [whisper] = gentle/soft, NOT a breathy whisper.
-                    # 'very low pitch' gives an intimate, tender tone without
-                    # the harsh breathy quality that 'whisper' instruct produces.
-                    seg_tokens = [gender_token, age_token, "very low pitch"]
                 else:
                     seg_tokens = [gender_token, age_token, "moderate pitch"]
                     
