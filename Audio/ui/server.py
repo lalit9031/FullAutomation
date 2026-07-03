@@ -170,8 +170,34 @@ def parse_script_to_phrases(text: str, style: str, gender: str, language: str):
                     current_emotion = f"[{tag_name}]"
         else:
             # Regular text — accumulate
-            # Newlines are sentence separators; convert to space for natural flow
-            pending_text += token.replace("\n", " ")
+            # Newlines are EMOTION RESET boundaries:
+            # - In poems (no voice tags): each line gets its OWN emotion tag
+            # - In stories: voice tags flush + reset; newlines also reset emotion
+            #   to prevent emotion bleeding across narrator paragraphs
+            if "\n" in token:
+                # Split on newlines. Each non-empty chunk goes into pending_text,
+                # then IMMEDIATELY flushes + resets emotion (since a newline follows it).
+                # This ensures each poem line is an independent emotional segment.
+                parts_by_newline = token.split("\n")
+                for j, chunk in enumerate(parts_by_newline):
+                    is_last = (j == len(parts_by_newline) - 1)
+                    if chunk.strip():
+                        pending_text += chunk
+                        if not is_last:
+                            # Newline follows this text → flush and reset emotion
+                            flush(pending_text, current_voice, current_emotion)
+                            pending_text = ""
+                            current_emotion = None
+                    elif not is_last:
+                        # Blank line between chunks (double newline) → flush and reset
+                        if pending_text.strip():
+                            flush(pending_text, current_voice, current_emotion)
+                            pending_text = ""
+                            current_emotion = None
+            else:
+                pending_text += token
+
+
     
     # Flush any remaining text
     flush(pending_text, current_voice, current_emotion)
@@ -449,8 +475,9 @@ async def generate_audio(request: Request):
     
     print(f"Generating: Phrases={text_lines}, BaseInstruct='{instruct}'")
     
-    # Fixed guidance_scale for speech — singing uses its own settings in the Music module
-    cfg_scale = 2.5
+    # Fixed guidance_scale — poem gets slightly higher for more expressive delivery
+    # Speech: 2.5 | Poem: 3.0 (more dramatic, varied intonation)
+    cfg_scale = 3.0 if style == "poem" else 2.5
     
     config = OmniVoiceGenerationConfig(
         num_step=70,  # Optimal quality steps
@@ -476,7 +503,28 @@ async def generate_audio(request: Request):
             accent = "indian accent" if language != "english" else ""
             is_hindi = language == "hindi"
             
-            if voice == "narrator":
+            if style == "poem":
+                # ── POEM PROSODY ENGINE ─────────────────────────────────────────
+                # Each poem line gets a pitch profile based on its emotion.
+                # This creates the natural UP-DOWN feel of poetry recitation:
+                #   [happy]/[excited] → high pitch  (voice lifts, bright)
+                #   [sad]/[longing]   → low pitch   (voice drops, heavy)
+                #   [whisper]         → whisper     (intimate, quiet)
+                #   no emotion        → moderate pitch (neutral, flowing)
+                # Gender stays fixed (the poem's single voice)
+                gender_token = "female" if gender in ["female", "kid_girl"] else "male"
+                age_token = "child" if gender in ["kid_girl", "kid_boy"] else "young adult"
+                
+                if "[happy]" in line or "[excited]" in line or "[laughter]" in line:
+                    seg_tokens = [gender_token, age_token, "high pitch"]
+                elif "[sad]" in line:
+                    seg_tokens = [gender_token, age_token, "low pitch"]
+                elif "[whisper]" in line:
+                    seg_tokens = [gender_token, age_token, "whisper"]
+                else:
+                    seg_tokens = [gender_token, age_token, "moderate pitch"]
+                    
+            elif voice == "narrator":
                 # Narrator: authoritative, opposite gender to default speaker for contrast
                 if gender in ["kid_girl", "female"]:
                     seg_tokens = ["male", "middle-aged", "moderate pitch"]
@@ -527,17 +575,31 @@ async def generate_audio(request: Request):
             formatted_line = formatted_line.replace("?", " ? ")
             formatted_line = formatted_line.replace("।", " । ")
             formatted_line = " ".join(formatted_line.split())
-            if not formatted_line.endswith(".") and not formatted_line.endswith("।"):
-                formatted_line = f"{formatted_line} ."
+            
+            if style == "poem":
+                # For poems: append ellipsis to signal a held/stretched ending
+                # This makes OmniVoice hold the final word and trail off
+                # rather than clipping abruptly (gives the poem a sung feel)
+                if not any(formatted_line.endswith(p) for p in ["...", ".", "!", "?"]):
+                    formatted_line = f"{formatted_line} ..."
+                elif formatted_line.endswith(" ."):
+                    # Replace plain period with ellipsis for poem lines
+                    formatted_line = formatted_line[:-2] + " ..."
+            else:
+                if not formatted_line.endswith(".") and not formatted_line.endswith("।"):
+                    formatted_line = f"{formatted_line} ."
                 
             print(f"Generating segment {i}/{len(text_lines)}: '{formatted_line}' | Voice='{voice}' | Instruct='{seg_instruct}'")
             audio = model.generate(text=formatted_line, instruct=seg_instruct, language=language.title(), config=config)
             audio_data = audio[0].cpu().numpy() if hasattr(audio[0], "cpu") else audio[0]
             audio_segments.append(audio_data)
             
-        # Concatenate audio segments with a 0.2s natural pause between sentences
+        # Concatenate audio segments with pauses
+        # POEM: 0.4s breath pause between lines (natural recitation breathing)
+        # STORY/SPEECH: 0.2s pause between sentences
         sample_rate = 24000
-        pause_samples = int(0.2 * sample_rate)
+        pause_dur = 0.4 if style == "poem" else 0.2
+        pause_samples = int(pause_dur * sample_rate)
         pause_interval = np.zeros(pause_samples, dtype=np.float32)
         
         final_audio = []
