@@ -104,7 +104,10 @@ async def chat_agent(request: Request):
         '2. Place these tags in-line at transition boundaries to match the narrative feeling (e.g., [happy] for joy, [excited] for surprises, [whisper] for secrets, [laughter] for funny parts). Do not mix too many tags, keep it natural.\n'
         '3. ENGLISH SINGING: For English rhymes/songs, combine [singing] with an emotion, e.g. \\"[singing] [happy] Twinkle, twinkle, little star...\\".\n'
         '4. HINDI/INDIAN LANGUAGES: Never use the [singing] tag for Hindi or other Indian languages because the singing model generates Chinese melodies. Instead, for Hindi singing/poem/rhymes, use rhythmic text with emotion tags (like [happy] or [excited]) without the [singing] tag.\n'
-        '5. STORIES: For stories, inject tags in-line inside the text. Example: \\"[happy] Once upon a time, a little puppy found a key. [excited] Suddenly, the door popped open! [laughter] Out rolled a hundred bouncing balls! [whisper] He walked inside quietly to explore...\\"",\n'
+        '5. DUAL-VOICE STORYTELLING: For stories/dialogues, you can write character voice tags in-line to switch speakers. For kids stories, alternate between [narrator] (for the story teller) and [child] (for characters). For adult stories, alternate between [male] and [female].\n'
+        '6. EXAMPLES:\n'
+        '- English Kids Story: \\"[narrator] Once upon a time, a little girl said: [child] [happy] I found a shiny shell! [narrator] Then her father replied: [male] That is beautiful, sweetheart!\\"\n'
+        '- Hindi Kids Story: \\"[narrator] एक जंगल में चीकू बंदर रहता था। एक दिन वह बोला: [child] [happy] आज तो मैं पके केले खाऊंगा! [narrator] तभी भालू दादा बोले: [male] मेरे पास भी एक केला है।\\"",\n'
         '  "language": "english", "hindi", "bengali", "tamil", "telugu", "marathi", "gujarati", "kannada", "malayalam", or "punjabi",\n'
         '  "gender": "male", "female", "kid_boy", or "kid_girl",\n'
         '  "style": "normal", "storytelling", "whisper", "exciting", "singing", or "poem"\n'
@@ -241,7 +244,7 @@ async def generate_audio(request: Request):
     # 1. Parse text into phrases using newlines, major punctuation, and commas (with word-count merging)
     import re
     raw_lines = re.split(r'[\n.!?;]+', text)
-    text_lines = []
+    text_lines = []  # List of dicts: {"text": str, "voice": str}
     
     # Check for active emotion tags in the user prompt script
     has_happy = "[happy]" in text
@@ -249,10 +252,23 @@ async def generate_audio(request: Request):
     has_excited = "[excited]" in text
     has_whisper = "[whisper]" in text
     
+    # Active voice profile tracking state machine
+    current_voice = "default"
+    
     for line in raw_lines:
         line_strip = line.strip()
         if not line_strip:
             continue
+            
+        # Update current voice if a voice tag is found in this line
+        if "[narrator]" in line_strip:
+            current_voice = "narrator"
+        elif "[child]" in line_strip or "[kid]" in line_strip:
+            current_voice = "child"
+        elif "[male]" in line_strip:
+            current_voice = "male"
+        elif "[female]" in line_strip:
+            current_voice = "female"
             
         # Split line by commas
         comma_parts = [p.strip() for p in line_strip.split(",") if p.strip()]
@@ -262,7 +278,7 @@ async def generate_audio(request: Request):
         for part in comma_parts:
             # Clean all bracketed tags from the text content to prevent duplicate synthesis
             part_clean = part
-            for tag in ["[singing]", "[happy]", "[sad]", "[excited]", "[whisper]"]:
+            for tag in ["[singing]", "[happy]", "[sad]", "[excited]", "[whisper]", "[laughter]", "[narrator]", "[child]", "[kid]", "[male]", "[female]"]:
                 part_clean = part_clean.replace(tag, "")
             part_clean = part_clean.strip()
             
@@ -278,43 +294,44 @@ async def generate_audio(request: Request):
                 else:
                     # Construct correct prefix tags
                     tags = []
-                    if style == "singing" or "[singing]" in text:
+                    # Only apply singing tag for English language
+                    if (style == "singing" or "[singing]" in text) and language == "english":
                         tags.append("[singing]")
-                    if has_happy:
+                    if has_happy or "[happy]" in line:
                         tags.append("[happy]")
-                    elif has_sad:
+                    elif has_sad or "[sad]" in line:
                         tags.append("[sad]")
-                    elif has_excited:
+                    elif has_excited or "[excited]" in line or "[laughter]" in line:
                         tags.append("[excited]")
-                    elif has_whisper or style == "whisper":
+                    elif has_whisper or style == "whisper" or "[whisper]" in line:
                         tags.append("[whisper]")
                         
                     prefix = " ".join(tags)
                     if prefix:
                         temp_phrase = f"{prefix} {temp_phrase}"
-                    text_lines.append(temp_phrase)
+                    text_lines.append({"text": temp_phrase, "voice": current_voice})
                     temp_phrase = part_clean
         if temp_phrase:
             tags = []
-            if style == "singing" or "[singing]" in text:
+            if (style == "singing" or "[singing]" in text) and language == "english":
                 tags.append("[singing]")
-            if has_happy:
+            if has_happy or "[happy]" in line:
                 tags.append("[happy]")
-            elif has_sad:
+            elif has_sad or "[sad]" in line:
                 tags.append("[sad]")
-            elif has_excited:
+            elif has_excited or "[excited]" in line or "[laughter]" in line:
                 tags.append("[excited]")
-            elif has_whisper or style == "whisper":
+            elif has_whisper or style == "whisper" or "[whisper]" in line:
                 tags.append("[whisper]")
                 
             prefix = " ".join(tags)
             if prefix:
                 temp_phrase = f"{prefix} {temp_phrase}"
-            text_lines.append(temp_phrase)
+            text_lines.append({"text": temp_phrase, "voice": current_voice})
         
     instruct = get_instruct_prompt(gender, style, language)
     
-    print(f"Generating: Phrases={text_lines}, Instruct='{instruct}'")
+    print(f"Generating: Phrases={text_lines}, BaseInstruct='{instruct}'")
     
     # Increase guidance_scale to 3.5 for singing to enforce rhythm tags
     cfg_scale = 3.5 if (style == "singing" or "[singing]" in text) else 2.5
@@ -334,7 +351,51 @@ async def generate_audio(request: Request):
             return JSONResponse(status_code=400, content={"error": "Text script is empty."})
             
         audio_segments = []
-        for i, line in enumerate(text_lines, 1):
+        for i, item in enumerate(text_lines, 1):
+            line = item["text"]
+            voice = item["voice"]
+            
+            # Resolve segment-specific instruct prompt based on voice type
+            accent = "indian accent" if language != "english" else ""
+            
+            # Calculate voice instruct tokens
+            if voice == "male":
+                seg_tokens = ["male"]
+                if "child" not in instruct:
+                    seg_tokens.append("middle-aged")
+            elif voice == "female":
+                seg_tokens = ["female"]
+                if "child" not in instruct:
+                    seg_tokens.append("middle-aged")
+            elif voice == "child":
+                # Default to female child for kid_girl, male child for kid_boy
+                g = "female" if (gender == "kid_girl" or "female" in instruct) else "male"
+                seg_tokens = [g, "child", "high pitch"]
+            elif voice == "narrator":
+                # Narrator voice (usually adult, opposite to child/default profile)
+                g = "male" if "female" in instruct else "female"
+                seg_tokens = [g, "middle-aged"]
+            else:
+                # Fallback to default speaker configuration
+                seg_tokens = [instruct]
+                
+            # Apply style properties
+            if "[whisper]" in line:
+                seg_tokens.append("whisper")
+            if accent and accent not in seg_tokens:
+                seg_tokens.append(accent)
+                
+            # Build clean deduplicated instruct string
+            seen = set()
+            final_tokens = []
+            for t_group in seg_tokens:
+                for t in t_group.split(","):
+                    t = t.strip()
+                    if t and t not in seen:
+                        seen.add(t)
+                        final_tokens.append(t)
+            seg_instruct = ", ".join(final_tokens)
+            
             # Apply community-recommended formatting to prevent final-word cutoff bugs
             formatted_line = line.replace(",", " , ")
             formatted_line = formatted_line.replace(".", " . ")
@@ -345,8 +406,8 @@ async def generate_audio(request: Request):
             if not formatted_line.endswith(".") and not formatted_line.endswith("।"):
                 formatted_line = f"{formatted_line} ."
                 
-            print(f"Generating segment {i}/{len(text_lines)}: '{formatted_line}' (original: '{line}')")
-            audio = model.generate(text=formatted_line, instruct=instruct, config=config)
+            print(f"Generating segment {i}/{len(text_lines)}: '{formatted_line}' | Voice='{voice}' | Instruct='{seg_instruct}'")
+            audio = model.generate(text=formatted_line, instruct=seg_instruct, language=language.title(), config=config)
             audio_data = audio[0].cpu().numpy() if hasattr(audio[0], "cpu") else audio[0]
             audio_segments.append(audio_data)
             
