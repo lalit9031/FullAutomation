@@ -68,7 +68,7 @@ def get_instruct_prompt(gender: str, style: str, language: str) -> str:
     # 2. Style
     if style == "whisper":
         tokens.append("whisper")
-    elif style == "exciting" or style == "singing":
+    elif style == "exciting":
         if "high pitch" not in tokens:
             tokens.append("high pitch")
     elif style == "calm":
@@ -89,7 +89,7 @@ def get_instruct_prompt(gender: str, style: str, language: str) -> str:
 
 def parse_script_to_phrases(text: str, style: str, gender: str, language: str):
     import re
-    is_singing = (style == "singing" or "[singing]" in text) and language == "english"
+    is_singing = False  # Singing is handled by the Music module, not Audio
     
     # ── Pre-process: split on newlines first to track line boundaries ──
     # Each line gets its OWN emotion state — emotions do NOT carry across lines.
@@ -122,7 +122,7 @@ def parse_script_to_phrases(text: str, style: str, gender: str, language: str):
                     current_voice = tag_name
                     # Voice switch also resets emotions
                     current_emotions = []
-                elif tag_name in ["singing", "happy", "sad", "excited", "whisper", "laughter"]:
+                elif tag_name in ["happy", "sad", "excited", "whisper", "laughter"]:
                     if part not in current_emotions:
                         current_emotions.append(part)
             else:
@@ -178,7 +178,7 @@ def parse_script_to_phrases(text: str, style: str, gender: str, language: str):
     # 1. Strip any stray tag text from the segment content
     # 2. Prepend correct emotion prefix (max ONE primary emotion tag + [singing])
     final_segments = []
-    EMOTION_TAGS = {"[singing]", "[happy]", "[sad]", "[excited]", "[whisper]", "[laughter]"}
+    EMOTION_TAGS = {"[happy]", "[sad]", "[excited]", "[whisper]", "[laughter]"}
     VOICE_TAGS   = {"[narrator]", "[child]", "[kid]", "[male]", "[female]"}
     ALL_STRIP    = EMOTION_TAGS | VOICE_TAGS
     
@@ -191,20 +191,10 @@ def parse_script_to_phrases(text: str, style: str, gender: str, language: str):
         if not text_clean:
             continue
         
-        # Build tag prefix — use at most ONE non-[singing] emotion to avoid confusion
+        # Build tag prefix — use at most ONE emotion to avoid confusion
         seg_emotions = seg["emotions"]
-        
-        # Separate [singing] from other emotions
-        non_singing = [e for e in seg_emotions if e != "[singing]"]
-        has_singing = "[singing]" in seg_emotions or is_singing
-        
-        # Take only the FIRST non-singing emotion (e.g., [happy] OR [excited], never both)
-        primary_emotion = non_singing[:1]  # At most one emotion tag
-        
-        tags = []
-        if has_singing:
-            tags.append("[singing]")
-        tags.extend(primary_emotion)
+        primary_emotion = seg_emotions[:1]  # At most one emotion tag
+        tags = list(primary_emotion)
         
         prefix = " ".join(tags)
         if prefix:
@@ -230,17 +220,15 @@ async def chat_agent(request: Request):
         '{\n'
         '  "reply": "A friendly message explaining how you updated the options based on their request.",\n'
         '  "text": "The script/story/rhyme to synthesize. IMPORTANT RULES FOR TAGS:\n'
-        '1. Use emotion tags: [happy], [sad], [excited], [whisper], [laughter] dynamically to enhance the vocal delivery.\n'
-        '2. Place these tags in-line at transition boundaries to match the narrative feeling (e.g., [happy] for joy, [excited] for surprises, [whisper] for secrets, [laughter] for funny parts). Do not mix too many tags, keep it natural.\n'
-        '3. ENGLISH SINGING: For English rhymes/songs, combine [singing] with an emotion, e.g. \\"[singing] [happy] Twinkle, twinkle, little star...\\".\n'
-        '4. HINDI/INDIAN LANGUAGES: Never use the [singing] tag for Hindi or other Indian languages because the singing model generates Chinese melodies. Instead, for Hindi singing/poem/rhymes, use rhythmic text with emotion tags (like [happy] or [excited]) without the [singing] tag.\n'
-        '5. DUAL-VOICE STORYTELLING: For stories/dialogues, you can write character voice tags in-line to switch speakers. For kids stories, alternate between [narrator] (for the story teller) and [child] (for characters). For adult stories, alternate between [male] and [female].\n'
-        '6. EXAMPLES:\n'
+        '1. Use emotion tags: [happy], [sad], [excited], [whisper], [laughter] dynamically to enhance vocal delivery.\n'
+        '2. Place these tags inline at transition boundaries to match the narrative feeling. Do not mix too many tags — keep it natural.\n'
+        '3. DUAL-VOICE STORYTELLING: For stories/dialogues, use character voice tags to switch speakers. For kids stories, alternate between [narrator] (storyteller) and [child] (characters). For adult stories, alternate between [male] and [female].\n'
+        '4. EXAMPLES:\n'
         '- English Kids Story: \\"[narrator] Once upon a time, a little girl said: [child] [happy] I found a shiny shell! [narrator] Then her father replied: [male] That is beautiful, sweetheart!\\"\n'
         '- Hindi Kids Story: \\"[narrator] एक जंगल में चीकू बंदर रहता था। एक दिन वह बोला: [child] [happy] आज तो मैं पके केले खाऊंगा! [narrator] तभी भालू दादा बोले: [male] मेरे पास भी एक केला है।\\"",\n'
         '  "language": "english", "hindi", "bengali", "tamil", "telugu", "marathi", "gujarati", "kannada", "malayalam", or "punjabi",\n'
         '  "gender": "male", "female", "kid_boy", or "kid_girl",\n'
-        '  "style": "normal", "storytelling", "whisper", "exciting", "singing", or "poem"\n'
+        '  "style": "normal", "storytelling", "whisper", "exciting", or "poem"\n'
         '}\n'
         "Do not include markdown triple-ticks, code blocks, or extra text outside this JSON."
     )
@@ -311,17 +299,18 @@ async def chat_agent(request: Request):
             )
             parsed_config["reply"] = "रहस्यमयी फुसफुसाहट (whisper) के लिए स्क्रिप्ट लोड कर दी गई है।"
         
-        # English Twinkle Twinkle Demo (only when explicitly requested)
+        # English Twinkle Twinkle Demo — NOTE: Twinkle is a RHYME, not a song.
+        # It uses poem-style emotional recitation here (no [singing] tag — that lives in Music module)
         elif lang == "english" and wants_twinkle:
             parsed_config["text"] = (
-                "[singing] [happy] Twinkle, twinkle, little star, How I wonder what you are!\n"
-                "[singing] [happy] Up above the world so high, Like a diamond in the sky.\n"
-                "[singing] [sad] When the blazing sun is gone, When he nothing shines upon,\n"
-                "[singing] [happy] Then you show your little light, Twinkle, twinkle, all the night."
+                "[happy] Twinkle, twinkle, little star, How I wonder what you are!\n"
+                "[happy] Up above the world so high, Like a diamond in the sky.\n"
+                "[sad] When the blazing sun is gone, When he nothing shines upon,\n"
+                "[happy] Then you show your little light, Twinkle, twinkle, all the night."
             )
-            parsed_config["reply"] = "I've loaded the full 'Twinkle Twinkle Little Star' nursery rhyme in [singing] mode!"
+            parsed_config["reply"] = "I've loaded 'Twinkle Twinkle Little Star' as a poem with happy and sad emotional tones. (For a sung version, use the Music Studio.)"
             parsed_config["gender"] = "kid_girl"
-            parsed_config["style"] = "singing"
+            parsed_config["style"] = "poem"
         
         # English Magic Squirrel Story Demo
         elif lang == "english" and wants_squirrel:
@@ -368,8 +357,8 @@ async def generate_audio(request: Request):
     
     print(f"Generating: Phrases={text_lines}, BaseInstruct='{instruct}'")
     
-    # Increase guidance_scale to 3.5 for singing to enforce rhythm tags
-    cfg_scale = 3.5 if (style == "singing" or "[singing]" in text) else 2.5
+    # Fixed guidance_scale for speech — singing uses its own settings in the Music module
+    cfg_scale = 2.5
     
     config = OmniVoiceGenerationConfig(
         num_step=70,  # Optimal quality steps

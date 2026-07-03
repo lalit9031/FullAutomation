@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Music Studio — AI Song Generator</title>
+  <meta name="description" content="Local AI Music Studio: Generate original songs with emotional singing voices powered by OmniVoice."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+  <div class="bg-orbs">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">🎵</span>
+        <div>
+          <h1>Music Studio</h1>
+          <p class="logo-sub">AI-Powered Song Generator</p>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span class="badge badge-green" id="status-badge">● OmniVoice Singing</span>
+        <span class="badge badge-purple">Port 8006</span>
+        <a href="http://localhost:8005" class="badge badge-gray" title="Switch to Audio Studio">🎙 Audio Studio</a>
+      </div>
+    </header>
+
+    <!-- Main content -->
+    <main class="main">
+
+      <!-- LEFT: Chat Agent -->
+      <section class="panel panel-chat">
+        <div class="panel-header">
+          <span class="panel-icon">🤖</span>
+          <h2>Song AI Agent</h2>
+          <span class="panel-hint">Describe your song idea</span>
+        </div>
+
+        <div class="chat-messages" id="chat-messages">
+          <div class="msg msg-ai">
+            <div class="msg-avatar">🎵</div>
+            <div class="msg-bubble">
+              <p>Welcome to Music Studio! Tell me what kind of song you want — love song, sad song, birthday song, motivational anthem — and I'll write the lyrics and sing it for you!</p>
+              <p class="msg-hint">Try: <em>"I want a romantic love song"</em> or <em>"Write a happy birthday song"</em></p>
+            </div>
+          </div>
+        </div>
+
+        <form class="chat-form" id="chat-form" onsubmit="sendMessage(event)">
+          <input type="text" id="chat-input" class="chat-input"
+            placeholder="Describe your song idea..."
+            autocomplete="off"/>
+          <button type="submit" class="btn btn-send" id="btn-send">
+            <span class="btn-icon">➤</span>
+          </button>
+        </form>
+      </section>
+
+      <!-- RIGHT: Song Studio -->
+      <section class="panel panel-studio">
+        <div class="panel-header">
+          <span class="panel-icon">🎤</span>
+          <h2>Song Studio</h2>
+          <span class="panel-hint">Edit lyrics and generate</span>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls-row">
+          <div class="control-group">
+            <label for="select-gender">Voice</label>
+            <select id="select-gender" class="select">
+              <option value="female">Female (Soprano)</option>
+              <option value="male">Male (Tenor)</option>
+              <option value="kid_girl">Kid Girl</option>
+              <option value="kid_boy">Kid Boy</option>
+            </select>
+          </div>
+          <div class="control-group mood-display">
+            <label>Mood</label>
+            <div class="mood-badge" id="mood-badge">🎵 Auto</div>
+          </div>
+          <div class="control-group title-display">
+            <label>Song Title</label>
+            <div class="title-badge" id="title-badge">—</div>
+          </div>
+        </div>
+
+        <!-- Lyrics editor -->
+        <div class="editor-wrapper">
+          <div class="editor-label">
+            <span>Lyrics Script</span>
+            <span class="editor-hint">Use [happy] [sad] [romantic] [longing] [excited] per line</span>
+          </div>
+          <textarea id="lyrics-input" class="lyrics-editor" rows="10"
+            placeholder="[romantic] You are my sunshine, my only sunshine...&#10;[happy] You make me happy when skies are gray...&#10;[longing] You'll never know dear how much I love you...&#10;[sad] Please don't take my sunshine away..."></textarea>
+        </div>
+
+        <!-- Segment preview -->
+        <div class="segments-preview" id="segments-preview" style="display:none">
+          <div class="segments-label">Parsed Segments (what OmniVoice will sing)</div>
+          <div class="segments-list" id="segments-list"></div>
+        </div>
+
+        <!-- Generate button -->
+        <button class="btn btn-generate" id="btn-generate" onclick="generateSong()">
+          <span class="btn-generate-icon">🎶</span>
+          Generate Song
+        </button>
+
+        <!-- Progress bar -->
+        <div class="progress-wrap" id="progress-wrap" style="display:none">
+          <div class="progress-bar" id="progress-bar"></div>
+          <div class="progress-label" id="progress-label">Generating...</div>
+        </div>
+
+        <!-- Player -->
+        <div class="player" id="player" style="display:none">
+          <div class="player-info">
+            <span class="player-icon">🎵</span>
+            <div class="player-meta">
+              <div class="player-title" id="player-title">Song</div>
+              <div class="player-time" id="player-time"></div>
+            </div>
+            <a class="btn btn-download" id="btn-download" download>⬇ Download</a>
+          </div>
+          <audio id="audio-player" controls class="audio-element"></audio>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
