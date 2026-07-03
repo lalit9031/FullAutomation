@@ -89,122 +89,111 @@ def get_instruct_prompt(gender: str, style: str, language: str) -> str:
 
 def parse_script_to_phrases(text: str, style: str, gender: str, language: str):
     import re
-    is_singing = False  # Singing is handled by the Music module, not Audio
+    """
+    Sequential state-machine parser.
     
-    # ── Pre-process: split on newlines first to track line boundaries ──
-    # Each line gets its OWN emotion state — emotions do NOT carry across lines.
-    # This prevents [happy] from line 1 bleeding into [excited] on line 2,
-    # which causes OmniVoice to read tag names aloud.
-    lines = text.split("\n")
+    KEY FIX: Handles BOTH inline and newline voice tag switching.
+    Old approach: split by newline first → failed for inline tags like:
+      '[narrator] text1 [male] dialogue [narrator] text2' (all one line)
+    
+    New approach: tokenize the ENTIRE text into [TAG] and TEXT tokens,
+    then walk through sequentially. Voice changes flush the buffer.
+    Emotions reset on every voice change (not just newlines).
+    """
+    VOICE_TAGS   = {"narrator", "child", "kid", "male", "female", "kid_boy", "kid_girl"}
+    EMOTION_TAGS = {"happy", "sad", "excited", "whisper", "laughter"}
+    ALL_KNOWN    = VOICE_TAGS | EMOTION_TAGS
+    
+    # Tokenize: split on [TAG] keeping delimiters, then split text on sentence boundaries
+    raw_tokens = re.split(r'(\[[a-zA-Z0-9_]+\])', text)
     
     parsed_segments = []
-    current_voice = "default"  # Voice CAN carry across lines (narrator stays narrator)
+    current_voice   = "default"
+    current_emotion = None   # ONE emotion at a time, reset on voice change
+    pending_text    = ""     # Accumulated text for current voice+emotion
     
-    for line in lines:
-        line = line.strip()
-        if not line:
+    def flush(txt, voice, emotion):
+        """Save pending text as a segment if non-empty."""
+        txt = txt.strip()
+        if not txt:
+            return
+        # Split on sentence-ending punctuation + ellipsis for natural segments
+        parts = re.split(r'(\.\.\.|[.!?।]+)', txt)
+        temp = ""
+        for p in parts:
+            if not p:
+                continue
+            if re.match(r'^(\.\.\.|[.!?।]+)$', p):
+                if temp:
+                    parsed_segments.append({"text": temp.strip(), "voice": voice, "emotion": emotion})
+                    temp = ""
+                continue
+            ps = p.strip()
+            if not ps:
+                continue
+            if temp:
+                parsed_segments.append({"text": temp.strip(), "voice": voice, "emotion": emotion})
+            temp = ps
+        if temp:
+            parsed_segments.append({"text": temp.strip(), "voice": voice, "emotion": emotion})
+    
+    for token in raw_tokens:
+        if not token:
             continue
         
-        # Each line starts with a FRESH emotion slate
-        current_emotions = []
-        
-        # Split line into tags + text parts
-        parts = re.split(r'(\[[a-zA-Z0-9_]+\])', line)
-        
-        # First pass: extract leading tags and text pieces
-        text_pieces = []
-        for part in parts:
-            if not part.strip():
+        # Check if this is a [TAG]
+        if token.startswith("[") and token.endswith("]"):
+            tag_name = token[1:-1].lower()
+            if tag_name not in ALL_KNOWN:
+                # Unknown tag — treat as text
+                pending_text += token
                 continue
-            if part.startswith("[") and part.endswith("]"):
-                tag_name = part[1:-1].lower()
-                if tag_name in ["narrator", "child", "kid", "male", "female"]:
-                    current_voice = tag_name
-                    # Voice switch also resets emotions
-                    current_emotions = []
-                elif tag_name in ["happy", "sad", "excited", "whisper", "laughter"]:
-                    if part not in current_emotions:
-                        current_emotions.append(part)
-            else:
-                text_pieces.append(part)
-        
-        # Combine remaining text, then split on sentence boundaries + ellipsis
-        line_text = " ".join(text_pieces).strip()
-        if not line_text:
-            continue
-        
-        # Split on: newline, period, !, ?, ;, Hindi full stop, OR ellipsis (...)
-        # Keep the delimiter so we can append it to the segment
-        sentences = re.split(r'(\.{3,}|[.!?;।]+)', line_text)
-        
-        temp_text = ""
-        for s in sentences:
-            if not s:
-                continue
-            # Punctuation-only separator
-            if re.match(r'^(\.{3,}|[.!?;।]+)$', s):
-                if temp_text:
-                    parsed_segments.append({
-                        "text": temp_text.strip(),
-                        "voice": current_voice,
-                        "emotions": list(current_emotions)
-                    })
-                    temp_text = ""
-                continue
-            s_strip = s.strip()
-            if not s_strip:
-                continue
-            if temp_text:
-                parsed_segments.append({
-                    "text": temp_text.strip(),
-                    "voice": current_voice,
-                    "emotions": list(current_emotions)
-                })
-            temp_text = s_strip
-        
-        if temp_text:
-            parsed_segments.append({
-                "text": temp_text.strip(),
-                "voice": current_voice,
-                "emotions": list(current_emotions)
-            })
-        
-        # ── DO NOT carry emotions to next line ── (already handled by per-line reset above)
-        # current_emotions is local to this loop iteration
-        
-        # Dummy reference to suppress unused-variable warning
             
-    # Post-process parsed_segments:
-    # 1. Strip any stray tag text from the segment content
-    # 2. Prepend correct emotion prefix (max ONE primary emotion tag + [singing])
+            if tag_name in VOICE_TAGS:
+                # Voice switch — FLUSH current buffer first, then update state
+                flush(pending_text, current_voice, current_emotion)
+                pending_text = ""
+                # Map kid_boy/kid_girl to canonical names
+                if tag_name == "kid_boy":
+                    current_voice = "kid_boy"
+                elif tag_name == "kid_girl":
+                    current_voice = "kid_girl"
+                else:
+                    current_voice = tag_name
+                # Voice switch also resets the emotion
+                current_emotion = None
+            
+            elif tag_name in EMOTION_TAGS:
+                # Emotion tag — only applies to this voice block
+                # Only update if not already set (first emotion wins per voice block)
+                if current_emotion is None:
+                    current_emotion = f"[{tag_name}]"
+        else:
+            # Regular text — accumulate
+            # Newlines are sentence separators; convert to space for natural flow
+            pending_text += token.replace("\n", " ")
+    
+    # Flush any remaining text
+    flush(pending_text, current_voice, current_emotion)
+    
+    # Post-process: strip stray tags from text content, build final segments
+    ALL_STRIP = {f"[{t}]" for t in ALL_KNOWN}
     final_segments = []
-    EMOTION_TAGS = {"[happy]", "[sad]", "[excited]", "[whisper]", "[laughter]"}
-    VOICE_TAGS   = {"[narrator]", "[child]", "[kid]", "[male]", "[female]"}
-    ALL_STRIP    = EMOTION_TAGS | VOICE_TAGS
     
     for seg in parsed_segments:
-        text_clean = seg["text"]
+        tc = seg["text"]
         for tag in ALL_STRIP:
-            text_clean = text_clean.replace(tag, "")
-        text_clean = " ".join(text_clean.split()).strip()
-        
-        if not text_clean:
+            tc = tc.replace(tag, "")
+        tc = " ".join(tc.split()).strip()
+        if len(tc) < 3:  # Skip near-empty fragments
             continue
         
-        # Build tag prefix — use at most ONE emotion to avoid confusion
-        seg_emotions = seg["emotions"]
-        primary_emotion = seg_emotions[:1]  # At most one emotion tag
-        tags = list(primary_emotion)
-        
-        prefix = " ".join(tags)
+        prefix = seg["emotion"] or ""
         if prefix:
-            text_clean = f"{prefix} {text_clean}"
-            
-        final_segments.append({
-            "text": text_clean,
-            "voice": seg["voice"]
-        })
+            tc = f"{prefix} {tc}"
         
+        final_segments.append({"text": tc, "voice": seg["voice"]})
+    
     return final_segments
 
 @app.post("/api/chat")
@@ -214,23 +203,38 @@ async def chat_agent(request: Request):
     
     # Let's prompt the local Ollama LLM to act as the Audio Configurator Agent
     system_prompt = (
-        "You are 'Audio Web Studio AI Assistant', a helpful local AI agent that configures an audio generation pipeline.\n"
-        "Analyze the user's intent to set appropriate synthesis parameters.\n"
-        "Return ONLY a clean JSON object containing:\n"
-        '{\n'
-        '  "reply": "A friendly message explaining how you updated the options based on their request.",\n'
-        '  "text": "The script/story/rhyme to synthesize. IMPORTANT RULES FOR TAGS:\n'
-        '1. Use emotion tags: [happy], [sad], [excited], [whisper], [laughter] dynamically to enhance vocal delivery.\n'
-        '2. Place these tags inline at transition boundaries to match the narrative feeling. Do not mix too many tags — keep it natural.\n'
-        '3. DUAL-VOICE STORYTELLING: For stories/dialogues, use character voice tags to switch speakers. For kids stories, alternate between [narrator] (storyteller) and [child] (characters). For adult stories, alternate between [male] and [female].\n'
-        '4. EXAMPLES:\n'
-        '- English Kids Story: \\"[narrator] Once upon a time, a little girl said: [child] [happy] I found a shiny shell! [narrator] Then her father replied: [male] That is beautiful, sweetheart!\\"\n'
-        '- Hindi Kids Story: \\"[narrator] एक जंगल में चीकू बंदर रहता था। एक दिन वह बोला: [child] [happy] आज तो मैं पके केले खाऊंगा! [narrator] तभी भालू दादा बोले: [male] मेरे पास भी एक केला है।\\"",\n'
-        '  "language": "english", "hindi", "bengali", "tamil", "telugu", "marathi", "gujarati", "kannada", "malayalam", or "punjabi",\n'
-        '  "gender": "male", "female", "kid_boy", or "kid_girl",\n'
-        '  "style": "normal", "storytelling", "whisper", "exciting", or "poem"\n'
-        '}\n'
-        "Do not include markdown triple-ticks, code blocks, or extra text outside this JSON."
+        "You are 'Audio Web Studio AI', a creative audio script writer and pipeline configurator.\n"
+        "Write rich, emotionally expressive audio scripts and return synthesis parameters.\n"
+        "Return ONLY a clean JSON object:\n"
+        "{\n"
+        "  \"reply\": \"Short friendly message about what you created.\",\n"
+        "  \"text\": \"The full audio script. MANDATORY RULES:\n"
+        "VOICE TAGS (switch speaker): [narrator] [male] [female] [child] [kid_boy] [kid_girl]\n"
+        "EMOTION TAGS (add feeling): [happy] [sad] [excited] [whisper] [laughter]\n"
+        "RULES:\n"
+        "1. ALWAYS start with [narrator] for storytelling.\n"
+        "2. Place ONE emotion tag IMMEDIATELY after a voice tag when that character speaks with feeling.\n"
+        "   Example: [child] [happy] मुझे केले बहुत पसंद हैं!\n"
+        "3. Characters must speak their OWN dialogue with a voice tag — never put dialogue under [narrator].\n"
+        "4. For a 5-6 minute story, write at LEAST 20-30 lines with frequent voice switches.\n"
+        "5. Vary emotions — use [happy], [excited], [sad], [whisper] at natural moments.\n"
+        "6. Animals/characters: use [male] for large/elder animals, [female] for birds/gentle animals, [kid_boy] or [child] for young animals.\n"
+        "7. HINDI STORIES: Write naturally in Hindi. Use [narrator] for story description, character voices for dialogue.\n"
+        "EXAMPLE (Hindi multi-character animal story):\n"
+        "[narrator] एक घने जंगल में तीन दोस्त रहते थे — शेर राजा, तोता मिठू, और हाथी भोला।\n"
+        "[narrator] एक दिन सुबह शेर राजा ने गर्जना की —\n"
+        "[male] [excited] आज हम सबको मिलकर जंगल की नदी पार करनी है!\n"
+        "[narrator] तोता मिठू पेड़ की डाली पर बैठकर बोला —\n"
+        "[female] [happy] वाह! मैं तो उड़कर पार कर लूंगी, लेकिन भोला का क्या?\n"
+        "[narrator] हाथी भोला थोड़ा घबराया और धीरे से बोला —\n"
+        "[male] [whisper] मुझे तैरना नहीं आता... क्या तुम लोग मेरी मदद करोगे?\n"
+        "[narrator] शेर राजा ने प्यार से कहा —\n"
+        "[male] [happy] बिल्कुल! दोस्त दोस्त के काम आते हैं!\",\n"
+        "  \"language\": \"english\", \"hindi\", \"bengali\", \"tamil\", \"telugu\", \"marathi\", \"gujarati\", \"kannada\", \"malayalam\", or \"punjabi\",\n"
+        "  \"gender\": \"male\", \"female\", \"kid_boy\", or \"kid_girl\",\n"
+        "  \"style\": \"normal\", \"storytelling\", \"whisper\", \"exciting\", or \"poem\"\n"
+        "}\n"
+        "Do not include markdown, code blocks, or any text outside this JSON."
     )
     
     try:
@@ -380,28 +384,36 @@ async def generate_audio(request: Request):
             voice = item["voice"]
             
             # Resolve segment-specific instruct prompt based on voice type
+            # IMPORTANT: Make voices MAXIMALLY DISTINCT so characters sound different
             accent = "indian accent" if language != "english" else ""
+            is_hindi = language == "hindi"
             
-            # Calculate voice instruct tokens
-            if voice == "male":
-                seg_tokens = ["male"]
-                if "child" not in instruct:
-                    seg_tokens.append("middle-aged")
+            if voice == "narrator":
+                # Narrator: authoritative, opposite gender to default speaker for contrast
+                if gender in ["kid_girl", "female"]:
+                    seg_tokens = ["male", "middle-aged", "moderate pitch"]
+                else:
+                    seg_tokens = ["female", "middle-aged", "moderate pitch"]
+            elif voice == "male":
+                # Male character: deep adult male — low pitch gives clear contrast
+                seg_tokens = ["male", "middle-aged", "low pitch"]
             elif voice == "female":
-                seg_tokens = ["female"]
-                if "child" not in instruct:
-                    seg_tokens.append("middle-aged")
-            elif voice == "child":
-                # Default to female child for kid_girl, male child for kid_boy
-                g = "female" if (gender == "kid_girl" or "female" in instruct) else "male"
-                seg_tokens = [g, "child", "high pitch"]
-            elif voice == "narrator":
-                # Narrator voice (usually adult, opposite to child/default profile)
-                g = "male" if "female" in instruct else "female"
-                seg_tokens = [g, "middle-aged"]
+                # Female character: clear adult female
+                seg_tokens = ["female", "young adult"]
+            elif voice in ["child", "kid"]:
+                # Generic child
+                seg_tokens = ["male", "child", "high pitch"]
+            elif voice == "kid_boy":
+                # Boy child
+                seg_tokens = ["male", "child", "high pitch"]
+            elif voice == "kid_girl":
+                # Girl child
+                seg_tokens = ["female", "child", "very high pitch"]
             else:
-                # Fallback to default speaker configuration
-                seg_tokens = [instruct]
+                # Default: use base speaker
+                seg_tokens = instruct.split(", ")
+
+
                 
             # Apply style properties
             if "[whisper]" in line:
