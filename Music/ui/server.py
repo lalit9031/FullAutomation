@@ -241,17 +241,17 @@ async def generate_music(request: Request):
     if not segments:
         return JSONResponse(status_code=400, content={"error": "Could not parse lyrics into segments."})
     
-    # Build instruct prompt (singing voice profile)
+    # Build instruct prompt (singing voice profile using valid OmniVoice tokens)
     if gender == "male":
-        instruct = "male, tenor, clear voice"
+        instruct = "male, middle-aged, moderate pitch"
     elif gender == "female":
-        instruct = "female, soprano, clear voice"
+        instruct = "female, young adult, high pitch"
     elif gender == "kid_boy":
-        instruct = "male, child, high pitch, clear voice"
+        instruct = "male, child, high pitch"
     elif gender == "kid_girl":
-        instruct = "female, child, high pitch, clear voice"
+        instruct = "female, child, very high pitch"
     else:
-        instruct = "female, clear voice"
+        instruct = "female, young adult"
     
     # Higher guidance for singing to enforce melody/rhythm
     config = OmniVoiceGenerationConfig(
