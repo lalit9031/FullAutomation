@@ -382,7 +382,42 @@ async def chat_agent(request: Request):
         # ── ALL OTHER REQUESTS: Trust LLM's generated text/style/gender directly ──
         # This covers love songs, romantic poems, horror stories, custom content, etc.
         # The LLM JSON output from Qwen is used without override.
+        
+        # ── Length extension for long-form story requests ──────────────────────
+        # If user wanted 5-6 mins but LLM wrote too little, continue the story
+        current_text = parsed_config.get("text", "")
+        current_lines = len([l for l in current_text.split("\n") if l.strip()])
+        current_style = parsed_config.get("style", "normal")
+        
+        if is_long and current_style == "storytelling" and current_lines < 28:
+            print(f"[Story Extension] Only {current_lines} lines — extending for 5-6 min target...")
+            lang_code = parsed_config.get("language", "hindi")
             
+            extend_prompt = (
+                f"Continue this {lang_code} story with 15-20 MORE lines. "
+                f"Keep the same characters and same tagged format ([narrator], [male], [female] etc). "
+                f"Add more dialogue, a challenge/problem the animals face, and a warm resolution/moral. "
+                f"Return ONLY the continuation text (no JSON, no markdown, just the tagged story lines).\n\n"
+                f"Story so far:\n{current_text}"
+            )
+            try:
+                r2 = requests.post("http://localhost:11434/api/chat", json={
+                    "model": "qwen2.5:14b",
+                    "messages": [{"role": "user", "content": extend_prompt}],
+                    "stream": False
+                }, timeout=90)
+                continuation = r2.json()["message"]["content"].strip()
+                # Strip any markdown wrapper if model wrapped it
+                if continuation.startswith("```"):
+                    continuation = continuation.strip("`").replace("json\n", "").strip()
+                # Append to story
+                parsed_config["text"] = current_text.rstrip() + "\n" + continuation
+                new_lines = len([l for l in parsed_config["text"].split("\n") if l.strip()])
+                print(f"[Story Extension] Extended to {new_lines} lines ✅")
+            except Exception as ex:
+                print(f"[Story Extension] Failed: {ex} — using original length")
+        
+
         return JSONResponse(content=parsed_config)
     except Exception as e:
         print(f"Ollama parsing failed: {e}")
