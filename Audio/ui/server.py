@@ -201,41 +201,94 @@ async def chat_agent(request: Request):
     data = await request.json()
     message = data.get("message", "")
     
-    # Let's prompt the local Ollama LLM to act as the Audio Configurator Agent
+    # ── Detect intent for content-type-specific instructions ──────────────────
+    msg_lower = message.lower()
+    is_poem   = any(k in msg_lower for k in ["poem", "rhyme", "poetry", "kavita", "कविता", "बालगीत"])
+    is_story  = any(k in msg_lower for k in ["story", "kahani", "कहानी", "tale", "fairy"])
+    is_long   = any(k in msg_lower for k in ["5 min", "6 min", "5-6 min", "long", "full length", "full story"])
+    
+    # Build content-type-specific guidance block
+    if is_poem:
+        content_rules = (
+            "CONTENT TYPE: POEM / RHYME\n"
+            "CRITICAL RULE: A poem uses ONE speaker voice only. NEVER use [narrator] in a poem.\n"
+            "Use ONLY emotion tags to color each stanza/line. The single voice IS the poet.\n"
+            "Format: ONE emotion tag per line → the voice carries the whole poem.\n"
+            "Emotions flow like: [happy] → [excited] → [whisper] → [sad] → [happy]\n"
+            "Each line = 1 poetic line. Put emotion tag at start of each stanza or when feeling changes.\n"
+            "POEM EXAMPLE (English):\n"
+            "[happy] The morning sun rises golden and bright,\n"
+            "[happy] Painting the sky with colors of light.\n"
+            "[excited] The birds sing and the rivers flow free,\n"
+            "[whisper] In the quiet of dawn, there is only me.\n"
+            "[sad] When evening comes and shadows grow long,\n"
+            "[sad] I remember old dreams and a half-forgotten song.\n"
+            "[happy] But the stars bring hope as they fill up the night,\n"
+            "[happy] And morning will come again, pure and bright.\n"
+            "HINDI POEM EXAMPLE:\n"
+            "[happy] उगता सूरज लाल-नारंगी, चिड़ियाँ गाएं गीत।\n"
+            "[happy] खेतों में हरियाली छाई, मन हो गया प्रीत।\n"
+            "[excited] बच्चे दौड़े, खिलखिलाए, झूला झूलें संग।\n"
+            "[whisper] शाम ढली तो माँ की लोरी, भर दे मन में रंग।\n"
+            "[sad] पर जब बादल घिर आते हैं, आँखें भर आती हैं।\n"
+            "[happy] फिर भी उम्मीद का दीपक, मन में जलता जाता है।\n"
+            "SET: style=poem, gender=female (default for poems)\n"
+        )
+    elif is_story:
+        length_note = (
+            "LENGTH: User wants 5-6 minutes of audio. Write a FULL story with at LEAST 30-40 lines.\n"
+            "Include: introduction, rising action, conflict/challenge, resolution, moral.\n"
+            "Add multiple dialogue exchanges between characters — not just one line each.\n"
+            if is_long else
+            "Write a complete story with beginning, middle and end. Minimum 15-20 lines.\n"
+        )
+        content_rules = (
+            "CONTENT TYPE: STORY / TALE\n"
+            "Use [narrator] for all story description/narration.\n"
+            "Use [male], [female], [child], [kid_boy], [kid_girl] for character dialogue.\n"
+            "ALWAYS put ONE emotion tag after the character voice tag for dialogue.\n"
+            "Animals: [male]=large/wise animals, [female]=gentle/bird animals, [child]/[kid_boy]=young animals.\n"
+            + length_note +
+            "STORY EXAMPLE (short excerpt):\n"
+            "[narrator] एक घने जंगल में शेर राजा, तोता मिठू और हाथी भोला रहते थे।\n"
+            "[narrator] एक दिन शेर राजा ने ऊँची आवाज़ में कहा —\n"
+            "[male] [excited] आज हम नदी पार करेंगे, कोई नहीं रुकेगा!\n"
+            "[narrator] तोता मिठू डर गई और बोली —\n"
+            "[female] [whisper] लेकिन राजा जी, नदी में मगरमच्छ भी हैं!\n"
+            "[narrator] हाथी भोला ने हिम्मत दिखाई और बोला —\n"
+            "[male] [happy] मैं सबको अपनी पीठ पर बिठाकर पार करूंगा!\n"
+            "[narrator] सभी जानवर खुश हो गए और हाथी पर सवार हो नदी पार की।\n"
+            "SET: style=storytelling\n"
+        )
+    else:
+        content_rules = (
+            "CONTENT TYPE: NORMAL SPEECH / GENERAL\n"
+            "Use simple emotion tags inline. No narrator needed unless it's a mini-story.\n"
+            "Keep it natural and conversational.\n"
+        )
+
     system_prompt = (
-        "You are 'Audio Web Studio AI', a creative audio script writer and pipeline configurator.\n"
-        "Write rich, emotionally expressive audio scripts and return synthesis parameters.\n"
-        "Return ONLY a clean JSON object:\n"
+        "You are 'Audio Web Studio AI', an expert audio script writer for a TTS pipeline.\n"
+        "Your job: detect what type of content the user wants, write a perfect tagged script, and return parameters.\n\n"
+        + content_rules + "\n"
+        "AVAILABLE TAGS:\n"
+        "  Voice (story only): [narrator] [male] [female] [child] [kid_boy] [kid_girl]\n"
+        "  Emotion: [happy] [sad] [excited] [whisper] [laughter]\n\n"
+        "GOLDEN RULES:\n"
+        "  - POEM: NO [narrator]. Single voice. Emotion tags only.\n"
+        "  - STORY: [narrator] + character voices. Characters always get emotion tags.\n"
+        "  - Never mix poem style with story style.\n"
+        "  - One emotion tag per line maximum.\n\n"
+        "Return ONLY this exact JSON (no markdown, no extra text):\n"
         "{\n"
-        "  \"reply\": \"Short friendly message about what you created.\",\n"
-        "  \"text\": \"The full audio script. MANDATORY RULES:\n"
-        "VOICE TAGS (switch speaker): [narrator] [male] [female] [child] [kid_boy] [kid_girl]\n"
-        "EMOTION TAGS (add feeling): [happy] [sad] [excited] [whisper] [laughter]\n"
-        "RULES:\n"
-        "1. ALWAYS start with [narrator] for storytelling.\n"
-        "2. Place ONE emotion tag IMMEDIATELY after a voice tag when that character speaks with feeling.\n"
-        "   Example: [child] [happy] मुझे केले बहुत पसंद हैं!\n"
-        "3. Characters must speak their OWN dialogue with a voice tag — never put dialogue under [narrator].\n"
-        "4. For a 5-6 minute story, write at LEAST 20-30 lines with frequent voice switches.\n"
-        "5. Vary emotions — use [happy], [excited], [sad], [whisper] at natural moments.\n"
-        "6. Animals/characters: use [male] for large/elder animals, [female] for birds/gentle animals, [kid_boy] or [child] for young animals.\n"
-        "7. HINDI STORIES: Write naturally in Hindi. Use [narrator] for story description, character voices for dialogue.\n"
-        "EXAMPLE (Hindi multi-character animal story):\n"
-        "[narrator] एक घने जंगल में तीन दोस्त रहते थे — शेर राजा, तोता मिठू, और हाथी भोला।\n"
-        "[narrator] एक दिन सुबह शेर राजा ने गर्जना की —\n"
-        "[male] [excited] आज हम सबको मिलकर जंगल की नदी पार करनी है!\n"
-        "[narrator] तोता मिठू पेड़ की डाली पर बैठकर बोला —\n"
-        "[female] [happy] वाह! मैं तो उड़कर पार कर लूंगी, लेकिन भोला का क्या?\n"
-        "[narrator] हाथी भोला थोड़ा घबराया और धीरे से बोला —\n"
-        "[male] [whisper] मुझे तैरना नहीं आता... क्या तुम लोग मेरी मदद करोगे?\n"
-        "[narrator] शेर राजा ने प्यार से कहा —\n"
-        "[male] [happy] बिल्कुल! दोस्त दोस्त के काम आते हैं!\",\n"
-        "  \"language\": \"english\", \"hindi\", \"bengali\", \"tamil\", \"telugu\", \"marathi\", \"gujarati\", \"kannada\", \"malayalam\", or \"punjabi\",\n"
-        "  \"gender\": \"male\", \"female\", \"kid_boy\", or \"kid_girl\",\n"
-        "  \"style\": \"normal\", \"storytelling\", \"whisper\", \"exciting\", or \"poem\"\n"
-        "}\n"
-        "Do not include markdown, code blocks, or any text outside this JSON."
+        "  \"reply\": \"Short friendly message about what you created (1-2 sentences).\",\n"
+        "  \"text\": \"<The full tagged script here>\",\n"
+        "  \"language\": \"hindi\" or \"english\" or \"bengali\" etc,\n"
+        "  \"gender\": \"male\" or \"female\" or \"kid_boy\" or \"kid_girl\",\n"
+        "  \"style\": \"poem\" or \"storytelling\" or \"normal\" or \"whisper\" or \"exciting\"\n"
+        "}"
     )
+
     
     try:
         r = requests.post("http://localhost:11434/api/chat", json={
