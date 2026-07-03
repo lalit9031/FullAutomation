@@ -168,3 +168,6 @@ EOF
 Wan2GP/
 Optimized_AI Studio/
 2DVideo/
+
+# Standalone GitHub CLI executable
+gh
