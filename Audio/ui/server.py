@@ -229,39 +229,19 @@ async def chat_agent(request: Request):
     
     # ── Detect intent for content-type-specific instructions ──────────────────
     msg_lower = message.lower()
-    is_poem   = any(k in msg_lower for k in ["poem", "rhyme", "poetry", "kavita", "कविता", "बालगीत"])
+    is_poem   = any(k in msg_lower for k in ["poem", "rhyme", "poetry", "kavita", "कविता", "बालगीत", "song", "sing", "music", "singing", "गाना", "गाओ", "संगीत"])
     is_story  = any(k in msg_lower for k in ["story", "kahani", "कहानी", "tale", "fairy"])
     is_long   = any(k in msg_lower for k in ["5 min", "6 min", "5-6 min", "long", "full length", "full story"])
     
-    # Build content-type-specific guidance block
     if is_poem:
-        content_rules = (
-            "CONTENT TYPE: POEM / RHYME\n"
-            "CRITICAL RULE: A poem uses ONE speaker voice only. NEVER use [narrator] in a poem.\n"
-            "Use ONLY emotion tags to color each stanza/line. The single voice IS the poet.\n"
-            "Format: ONE emotion tag per line → the voice carries the whole poem.\n"
-            "ALLOWED EMOTIONS FOR POEM (use ONLY these 3): [happy] [excited] [sad]\n"
-            "DO NOT use [whisper] or [laughter] in poems — they sound unnatural.\n"
-            "Emotions flow like: [happy] → [excited] → [sad] → [happy]\n"
-            "Each line = 1 poetic line. Put emotion tag at start of each stanza or when feeling changes.\n"
-            "POEM EXAMPLE (English):\n"
-            "[happy] The morning sun rises golden and bright,\n"
-            "[happy] Painting the sky with colors of light.\n"
-            "[excited] The birds sing and the rivers flow free,\n"
-            "[excited] In the warmth of dawn, my heart runs free.\n"
-            "[sad] When evening comes and shadows grow long,\n"
-            "[sad] I remember old dreams and a half-forgotten song.\n"
-            "[happy] But the stars bring hope as they fill up the night,\n"
-            "[happy] And morning will come again, pure and bright.\n"
-            "HINDI POEM EXAMPLE:\n"
-            "[happy] उगता सूरज लाल-नारंगी, चिड़ियाँ गाएं गीत।\n"
-            "[happy] खेतों में हरियाली छाई, मन हो गया प्रीत।\n"
-            "[excited] बच्चे दौड़े, खिलखिलाए, झूला झूलें संग।\n"
-            "[excited] उड़ती पतंगें, छूते आसमान, मन मस्त में रंग।\n"
-            "[sad] पर जब बादल घिर आते हैं, आँखें भर आती हैं।\n"
-            "[happy] फिर भी उम्मीद का दीपक, मन में जलता जाता है।\n"
-            "SET: style=poem, gender=female (default for poems)\n"
-        )
+        return JSONResponse(content={
+            "reply": "⚠️ Poems and rhymes are handled in the dedicated Music Studio (Port 8006). Please switch to the Music Studio tab/interface to compose and sing poems with musical rhythm.",
+            "text": "For poems and rhymes, please switch to the Music Studio (Port 8006) which is optimized with the singing pipeline.",
+            "language": "english",
+            "gender": "female",
+            "style": "normal"
+        })
+
     elif is_story:
         length_note = (
             "LENGTH: User wants 5-6 minutes of audio. Write a FULL story with at LEAST 30-40 lines.\n"
@@ -353,21 +333,18 @@ async def chat_agent(request: Request):
         wants_squirrel = "squirrel" in msg_l and "magic" in msg_l
         wants_whisper_demo = style == "whisper" and len(parsed_config.get("text", "")) < 10
         
-        # Hindi Singing / Demo — Chanda Mama
-        if lang == "hindi" and wants_chanda_mama and any(k in msg_l for k in ["singing", "sing", "गाना", "गाओ", "संगीत", "rhyme", "poem", "कविता", "बालगीत"]):
-            parsed_config["text"] = (
-                "[happy] चंदा मामा दूर के, पुए पकाएं बूर के।\n"
-                "[happy] आप खाएं थाली में, मुन्ने को दें प्याली में।\n"
-                "[happy] प्याली गई टूट, मुन्ना गया रूठ।\n"
-                "[excited] लाएंगे नई प्यालियां, बजा बजा के तालियां!\n"
-                "[happy] उड़नखटोले बैठेंगे, मुन्ने राजा ऐठेंगे!"
-            )
-            parsed_config["reply"] = "मैंने हिंदी बालगीत 'चंदा मामा दूर के' को [happy] और [excited] भावों के साथ लोड किया है। (नोट: हिंदी के लिए [singing] टैग का उपयोग नहीं होता क्योंकि यह चीनी राग उत्पन्न करता है।)"
-            parsed_config["gender"] = "kid_girl"
-            parsed_config["style"] = "poem"
-        
+        # Redirect poem templates to Music Studio
+        if wants_chanda_mama or wants_twinkle:
+            return JSONResponse(content={
+                "reply": "⚠️ Poems and rhymes are handled in the dedicated Music Studio (Port 8006). Please switch to the Music Studio tab/interface to compose and sing poems/rhymes with musical rhythm.",
+                "text": "For poems and rhymes, please switch to the Music Studio (Port 8006) which is optimized with the singing pipeline.",
+                "language": "english",
+                "gender": "female",
+                "style": "normal"
+            })
+
         # Hindi Chiku Monkey Story Demo
-        elif lang == "hindi" and wants_chiku:
+        if lang == "hindi" and wants_chiku:
             parsed_config["text"] = (
                 "[happy] एक जंगल में एक छोटा सा बंदर रहता था, जिसका नाम था चीकू।\n"
                 "[happy] चीकू बहुत नटखट था और उसे मीठे पके केले खाना बहुत पसंद था।\n"
@@ -383,19 +360,7 @@ async def chat_agent(request: Request):
                 "[whisper] क्या तुमने भी वह आवाज़ सुनी? कोई चुपके से आ रहा है।"
             )
             parsed_config["reply"] = "रहस्यमयी फुसफुसाहट (whisper) के लिए स्क्रिप्ट लोड कर दी गई है।"
-        
-        # English Twinkle Twinkle Demo — NOTE: Twinkle is a RHYME, not a song.
-        # It uses poem-style emotional recitation here (no [singing] tag — that lives in Music module)
-        elif lang == "english" and wants_twinkle:
-            parsed_config["text"] = (
-                "[happy] Twinkle, twinkle, little star, How I wonder what you are!\n"
-                "[happy] Up above the world so high, Like a diamond in the sky.\n"
-                "[sad] When the blazing sun is gone, When he nothing shines upon,\n"
-                "[happy] Then you show your little light, Twinkle, twinkle, all the night."
-            )
-            parsed_config["reply"] = "I've loaded 'Twinkle Twinkle Little Star' as a poem with happy and sad emotional tones. (For a sung version, use the Music Studio.)"
-            parsed_config["gender"] = "kid_girl"
-            parsed_config["style"] = "poem"
+
         
         # English Magic Squirrel Story Demo
         elif lang == "english" and wants_squirrel:
