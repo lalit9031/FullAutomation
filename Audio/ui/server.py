@@ -99,7 +99,12 @@ async def chat_agent(request: Request):
         "Return ONLY a clean JSON object containing:\n"
         '{\n'
         '  "reply": "A friendly message explaining how you updated the options based on their request.",\n'
-        '  "text": "The script/story/rhyme to synthesize. IMPORTANT: If generating text in Hindi or other Indian languages, write authentic, natural, grammatically correct, and standard language. If the user asks for a child rhyme in Hindi, generate a classic or highly natural Hindi child rhyme (e.g., about chanda mama, rain, or butterflies) with proper flow. Never output broken grammar, literal English translations, or gibberish.",\n'
+        '  "text": "The script/story/rhyme to synthesize. IMPORTANT RULES FOR TAGS:\n'
+        '1. Use emotion tags: [happy], [sad], [excited], [whisper], [laughter] dynamically to enhance the vocal delivery.\n'
+        '2. Place these tags in-line at transition boundaries to match the narrative feeling (e.g., [happy] for joy, [excited] for surprises, [whisper] for secrets, [laughter] for funny parts). Do not mix too many tags, keep it natural.\n'
+        '3. ENGLISH SINGING: For English rhymes/songs, combine [singing] with an emotion, e.g. \\"[singing] [happy] Twinkle, twinkle, little star...\\".\n'
+        '4. HINDI/INDIAN LANGUAGES: Never use the [singing] tag for Hindi or other Indian languages because the singing model generates Chinese melodies. Instead, for Hindi singing/poem/rhymes, use rhythmic text with emotion tags (like [happy] or [excited]) without the [singing] tag.\n'
+        '5. STORIES: For stories, inject tags in-line inside the text. Example: \\"[happy] Once upon a time, a little puppy found a key. [excited] Suddenly, the door popped open! [laughter] Out rolled a hundred bouncing balls! [whisper] He walked inside quietly to explore...\\"",\n'
         '  "language": "english", "hindi", "bengali", "tamil", "telugu", "marathi", "gujarati", "kannada", "malayalam", or "punjabi",\n'
         '  "gender": "male", "female", "kid_boy", or "kid_girl",\n'
         '  "style": "normal", "storytelling", "whisper", "exciting", "singing", or "poem"\n'
@@ -131,81 +136,82 @@ async def chat_agent(request: Request):
         gender = parsed_config.get("gender", "male")
         style = parsed_config.get("style", "normal")
         
-        # Hindi Singing
+        # Hindi Singing (No [singing] tag to avoid Chinese melodies; routed to emotional poem recitation)
         if lang == "hindi" and any(k in msg_l for k in ["singing", "sing", "गाना", "गाओ", "संगीत"]):
             parsed_config["text"] = (
-                "[singing] चंदा मामा दूर के, पुए पकाएं बूर के।\n"
-                "[singing] आप खाएं थाली में, मुन्ने को दें प्याली में।\n"
-                "[singing] प्याली गई टूट, मुन्ना गया रूठ।\n"
-                "[singing] लाएंगे नई प्यालियां, बजा बजा के तालियां!\n"
-                "[singing] उड़नखटोले बैठेंगे, मुन्ने राजा ऐठेंगे!"
+                "[happy] चंदा मामा दूर के, पुए पकाएं बूर के।\n"
+                "[happy] आप खाएं थाली में, मुन्ने को दें प्याली में।\n"
+                "[happy] प्याली गई टूट, मुन्ना गया रूठ।\n"
+                "[excited] लाएंगे नई प्यालियां, बजा बजा के तालियां!\n"
+                "[happy] उड़नखटोले बैठेंगे, मुन्ने राजा ऐठेंगे!"
             )
-            parsed_config["reply"] = "मैंने बच्चों के लिए पूर्ण हिंदी बालगीत 'चंदा मामा दूर के' गायन [singing] शैली में लोड कर दिया है!"
+            parsed_config["reply"] = "चूंकि मॉडल में हिंदी गायन (singing) के लिए चीनी रागों का प्रभाव होता है, इसलिए मैंने बच्चों के लिए पूर्ण हिंदी बालगीत 'चंदा मामा दूर के' को प्राकृतिक बाल-सस्वर पाठ (Emotional Poem) शैली में [happy] और [excited] भावों के साथ लोड कर दिया है!"
             parsed_config["gender"] = "kid_girl"
-            parsed_config["style"] = "singing"
+            parsed_config["style"] = "poem"
             
         # Hindi Poem / Rhymes (speech recitation, no singing tag)
         elif lang == "hindi" and any(k in msg_l for k in ["rhyme", "poem", "कविता", "बालगीत"]):
             parsed_config["text"] = (
-                "चंदा मामा दूर के, पुए पकाएं बूर के।\n"
-                "आप खाएं थाली में, मुन्ने को दें प्याली में।\n"
-                "प्याली गई टूट, मुन्ना गया रूठ।\n"
-                "लाएंगे नई प्यालियां, बजा बजा के तालियां!\n"
-                "उड़नखटोले बैठेंगे, मुन्ने राजा ऐठेंगे!"
+                "[happy] चंदा मामा दूर के, पुए पकाएं बूर के।\n"
+                "[happy] आप खाएं थाली में, मुन्ने को दें प्याली में।\n"
+                "[happy] प्याली गई टूट, मुन्ना गया रूठ।\n"
+                "[happy] लाएंगे नई प्यालियां, बजा बजा के तालियां!\n"
+                "[happy] उड़नखटोले बैठेंगे, मुन्ने राजा ऐठेंगे!"
             )
-            parsed_config["reply"] = "मैंने बच्चों के लिए सुंदर हिंदी कविता 'चंदा मामा दूर के' (सस्वर पाठ शैली) लोड कर दी है।"
+            parsed_config["reply"] = "मैंने बच्चों के लिए सुंदर हिंदी कविता 'चंदा मामा दूर के' को [happy] सस्वर पाठ शैली में लोड कर दिया है।"
             parsed_config["gender"] = "kid_girl"
             parsed_config["style"] = "poem"
             
-        # Hindi Stories
+        # Hindi Stories (Dynamic story telling tags)
         elif lang == "hindi" and any(k in msg_l for k in ["story", "कहानी", "कथा"]):
             parsed_config["text"] = (
-                "एक जंगल में एक छोटा सा बंदर रहता था, जिसका नाम था चीकू।\n"
-                "चीकू बहुत नटखट था और उसे मीठे पके केले खाना बहुत पसंद था।\n"
-                "एक दिन उसने एक बड़े पेड़ पर पीले-पीले केले लटके देखे और खुशी से उछल पड़ा!"
+                "[happy] एक जंगल में एक छोटा सा बंदर रहता था, जिसका नाम था चीकू।\n"
+                "[happy] चीकू बहुत नटखट था और उसे मीठे पके केले खाना बहुत पसंद था।\n"
+                "[excited] एक दिन उसने एक बड़े पेड़ पर पीले-पीले केले लटके देखे और खुशी से उछल पड़ा!"
             )
-            parsed_config["reply"] = "मैंने चीकू बंदर की एक मजेदार हिंदी कहानी लोड कर दी है।"
+            parsed_config["reply"] = "मैंने चीकू बंदर की मजेदार हिंदी कहानी को [happy] और [excited] भावों के साथ लोड कर दिया है।"
             parsed_config["style"] = "storytelling"
             
         # Hindi Whisper
         elif lang == "hindi" and style == "whisper":
             parsed_config["text"] = (
-                "धीरे से बोलो। हवा में कुछ फुसफुसाहट है।\n"
-                "क्या तुमने भी वह आवाज़ सुनी? कोई चुपके से आ रहा है।"
+                "[whisper] धीरे से बोलो। हवा में कुछ फुसफुसाहट है।\n"
+                "[whisper] क्या तुमने भी वह आवाज़ सुनी? कोई चुपके से आ रहा है।"
             )
             parsed_config["reply"] = "रहस्यमयी फुसफुसाहट (whisper) के लिए स्क्रिप्ट लोड कर दी गई है।"
             
-        # English Singing
+        # English Singing (Uses [singing] combined with emotional tags)
         elif lang == "english" and any(k in msg_l for k in ["singing", "sing", "song"]):
             parsed_config["text"] = (
-                "[singing] Twinkle, twinkle, little star, How I wonder what you are!\n"
-                "[singing] Up above the world so high, Like a diamond in the sky.\n"
-                "[singing] When the blazing sun is gone, When he nothing shines upon,\n"
-                "[singing] Then you show your little light, Twinkle, twinkle, all the night."
+                "[singing] [happy] Twinkle, twinkle, little star, How I wonder what you are!\n"
+                "[singing] [happy] Up above the world so high, Like a diamond in the sky.\n"
+                "[singing] [sad] When the blazing sun is gone, When he nothing shines upon,\n"
+                "[singing] [happy] Then you show your little light, Twinkle, twinkle, all the night."
             )
-            parsed_config["reply"] = "I've loaded the full English nursery rhyme 'Twinkle Twinkle Little Star' in singing [singing] mode!"
+            parsed_config["reply"] = "I've loaded the full English nursery rhyme 'Twinkle Twinkle Little Star' in singing [singing] mode with happy and sad transition tones!"
             parsed_config["gender"] = "kid_girl"
             parsed_config["style"] = "singing"
             
         # English Poem / Rhymes (speech recitation, no singing tag)
         elif lang == "english" and any(k in msg_l for k in ["rhyme", "poem", "poetry"]):
             parsed_config["text"] = (
-                "Twinkle, twinkle, little star, How I wonder what you are!\n"
-                "Up above the world so high, Like a diamond in the sky.\n"
-                "When the blazing sun is gone, When he nothing shines upon,\n"
-                "Then you show your little light, Twinkle, twinkle, all the night."
+                "[happy] Twinkle, twinkle, little star, How I wonder what you are!\n"
+                "[happy] Up above the world so high, Like a diamond in the sky.\n"
+                "[happy] When the blazing sun is gone, When he nothing shines upon,\n"
+                "[excited] Then you show your little light, Twinkle, twinkle, all the night."
             )
-            parsed_config["reply"] = "I've loaded the English poem 'Twinkle Twinkle Little Star' in rhythmic poem mode!"
+            parsed_config["reply"] = "I've loaded the English poem 'Twinkle Twinkle Little Star' in rhythmic poem mode with emotional tags!"
             parsed_config["gender"] = "kid_girl"
             parsed_config["style"] = "poem"
             
-        # English Stories
+        # English Stories (Dynamic story telling tags)
         elif lang == "english" and any(k in msg_l for k in ["story", "fairy tale"]):
             parsed_config["text"] = (
-                "Once upon a time, in a magical forest, lived a little golden squirrel.\n"
-                "She loved gathering glowing acorns under the silver light of the moon."
+                "[happy] Once upon a time, in a magical forest, lived a little golden squirrel.\n"
+                "[excited] Suddenly, she spotted a glowing acorn under the silver light of the moon!\n"
+                "[whisper] She walked closer quietly to investigate the magical spark..."
             )
-            parsed_config["reply"] = "I've set up a whimsical children's story in English."
+            parsed_config["reply"] = "I've set up a whimsical children's story in English with happy, excited, and whisper storytelling tags."
             parsed_config["style"] = "storytelling"
             
         return JSONResponse(content=parsed_config)
