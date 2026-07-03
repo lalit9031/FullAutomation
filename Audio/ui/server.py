@@ -520,7 +520,10 @@ async def generate_audio(request: Request):
                 elif "[sad]" in line:
                     seg_tokens = [gender_token, age_token, "low pitch"]
                 elif "[whisper]" in line:
-                    seg_tokens = [gender_token, age_token, "whisper"]
+                    # In poems, [whisper] = gentle/soft, NOT a breathy whisper.
+                    # 'very low pitch' gives an intimate, tender tone without
+                    # the harsh breathy quality that 'whisper' instruct produces.
+                    seg_tokens = [gender_token, age_token, "very low pitch"]
                 else:
                     seg_tokens = [gender_token, age_token, "moderate pitch"]
                     
@@ -552,7 +555,9 @@ async def generate_audio(request: Request):
 
                 
             # Apply style properties
-            if "[whisper]" in line:
+            # NOTE: For poem mode, [whisper] is already handled above as 'very low pitch'.
+            # Only append 'whisper' instruct for non-poem styles.
+            if "[whisper]" in line and style != "poem":
                 seg_tokens.append("whisper")
             if accent and accent not in seg_tokens:
                 seg_tokens.append(accent)
@@ -577,14 +582,16 @@ async def generate_audio(request: Request):
             formatted_line = " ".join(formatted_line.split())
             
             if style == "poem":
-                # For poems: append ellipsis to signal a held/stretched ending
-                # This makes OmniVoice hold the final word and trail off
-                # rather than clipping abruptly (gives the poem a sung feel)
-                if not any(formatted_line.endswith(p) for p in ["...", ".", "!", "?"]):
-                    formatted_line = f"{formatted_line} ..."
-                elif formatted_line.endswith(" ."):
-                    # Replace plain period with ellipsis for poem lines
-                    formatted_line = formatted_line[:-2] + " ..."
+                # For poems: strip the hard terminal punctuation and replace with
+                # a trailing comma pause ', ,' — OmniVoice reads a comma as a
+                # soft continuation breath, NOT a hard stop. This gives a smooth
+                # gentle trail-off at the end of each poem line instead of clipping.
+                # We use two commas so the trailing softness is audible.
+                for hard_end in [" !", " ?", " .", "!", "?", "."]:
+                    if formatted_line.endswith(hard_end):
+                        formatted_line = formatted_line[:-len(hard_end)]
+                        break
+                formatted_line = f"{formatted_line} , ,"
             else:
                 if not formatted_line.endswith(".") and not formatted_line.endswith("।"):
                     formatted_line = f"{formatted_line} ."
@@ -592,6 +599,22 @@ async def generate_audio(request: Request):
             print(f"Generating segment {i}/{len(text_lines)}: '{formatted_line}' | Voice='{voice}' | Instruct='{seg_instruct}'")
             audio = model.generate(text=formatted_line, instruct=seg_instruct, language=language.title(), config=config)
             audio_data = audio[0].cpu().numpy() if hasattr(audio[0], "cpu") else audio[0]
+            
+            # ── POEM SLOW PACE ──────────────────────────────────────────────────
+            # Stretch poem audio to ~80% speed (20% slower) using linear
+            # interpolation. This preserves pitch while slowing delivery,
+            # giving the gentle, deliberate pace of real poetry recitation.
+            # 0.80 = speak at 80% of normal speed
+            if style == "poem" and len(audio_data) > 0:
+                slow_factor = 0.82  # 18% slower — enough to feel poetic, not drowsy
+                original_len = len(audio_data)
+                new_len = int(original_len / slow_factor)
+                audio_data = np.interp(
+                    np.linspace(0, original_len - 1, new_len),
+                    np.arange(original_len),
+                    audio_data
+                ).astype(np.float32)
+            
             audio_segments.append(audio_data)
             
         # Concatenate audio segments with pauses
